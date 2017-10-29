@@ -1,9 +1,8 @@
 package com.github.igorsuhorukov.dom.transform;
 
 import com.github.igorsuhorukov.dom.transform.converter.TypeConverter;
-import org.w3c.dom.NamedNodeMap;
-import org.w3c.dom.Node;
-import org.w3c.dom.NodeList;
+import com.sun.org.apache.xerces.internal.dom.DocumentImpl;
+import org.w3c.dom.*;
 
 import java.util.*;
 import java.util.function.Function;
@@ -18,12 +17,86 @@ public class DomTransformer {
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
     private static final String VALUE_NAME = "_val_";
     private static final String TEXT_ELEMENT = "#text";
+    private static final String COMMENT = "#comment";
     private static final String CDATA_SECTION = "#cdata-section";
 
     private TypeConverter typeConverter;
 
     public DomTransformer(TypeConverter typeConverter) {
         this.typeConverter = typeConverter;
+    }
+
+    public Node transform(Map<String, Object> objectMap){
+        Document xmlDoc = new DocumentImpl();
+        return transform(xmlDoc, objectMap);
+    }
+
+    private Node transform(Document xmlDoc, Map<String, Object> objectMap){
+        if(objectMap.size()!=1){
+            throw new IllegalArgumentException();
+        }
+        String objectName = objectMap.keySet().iterator().next();
+        if(objectName.startsWith("@")){
+            Attr attribute = xmlDoc.createAttribute(objectName.substring(1));
+            Object value = objectMap.get(objectName);
+            if(value instanceof Map || value instanceof Collection) {
+                throw new IllegalArgumentException("invalid attribute "+objectName+" content: "+value.toString());
+            }
+            attribute.setValue(value.toString());
+            return attribute;
+
+        } else {
+            Node node = null;
+            try {
+                node = xmlDoc.createElement(objectName);
+            } catch (DOMException e) {
+                e.printStackTrace();
+            }
+            Object value = objectMap.get(objectName);
+            if(value!=null) {
+                if (value instanceof List) {
+                    for(Object item : (List)value){
+                        if(item instanceof Map){
+                            Map<String, Object> element = (Map<String, Object>) item;
+                            transformMap(xmlDoc, node, element);
+                        } else {
+                            node.appendChild(xmlDoc.createTextNode(item.toString()));
+                        }
+                    }
+                } else if (value instanceof Map) {
+                    transformMap(xmlDoc, node, (Map<String, Object>) value);
+                } else {
+                    node.appendChild(xmlDoc.createTextNode(value.toString()));
+                }
+            }
+            return node;
+        }
+    }
+
+    private void transformMap(Document xmlDoc, Node node, Map<String, Object> value) {
+        Map<String, Object> values = value;
+        for(Map.Entry<String, Object> entry: values.entrySet()){
+            if(entry.getValue() instanceof Collection){
+                for(Object item: (Collection) entry.getValue()) {
+                    Element element = xmlDoc.createElement(entry.getKey());
+                    if(item!=null && item instanceof Map){
+                        element.appendChild(transform(xmlDoc, Collections.singletonMap(entry.getKey(),item)));
+                    } else {
+                        element.appendChild(xmlDoc.createTextNode(item.toString()));
+                    }
+                    node.appendChild(element);
+                }
+            } else {
+                Node transform = transform(xmlDoc, Collections.singletonMap(entry.getKey(), entry.getValue()));
+                if (VALUE_NAME.equals(entry.getKey())) {
+                    node.appendChild(xmlDoc.createTextNode(entry.getValue().toString()));
+                } else if (entry.getKey().startsWith("@")) {
+                    node.getAttributes().setNamedItem(transform);
+                } else {
+                    node.appendChild(transform);
+                }
+            }
+        }
     }
 
     public Map<String, Object> transform(Node currentNode){
@@ -102,7 +175,8 @@ public class DomTransformer {
 
     private List<Map<String, Object>> getNestedElement(NodeList nestedNodes) {
         return IntStream.range(0, nestedNodes.getLength()).mapToObj(nestedNodes::item).
-                filter(node -> !TEXT_ELEMENT.equals(node.getNodeName()) && !CDATA_SECTION.equals(node.getNodeName())).
+                filter(node -> !TEXT_ELEMENT.equals(node.getNodeName()) &&
+                        !COMMENT.equals(node.getNodeName())&& !CDATA_SECTION.equals(node.getNodeName())).
                 map(this::transform).collect(Collectors.toList());
     }
 
