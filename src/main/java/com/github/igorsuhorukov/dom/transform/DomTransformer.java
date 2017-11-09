@@ -28,6 +28,9 @@ public class DomTransformer {
 
     public Node transform(Map<String, Object> objectMap){
         Document xmlDoc = new DocumentImpl();
+        if(objectMap.size()!=1){
+            throw new IllegalArgumentException("map size must be 1");
+        }
         return transform(xmlDoc, objectMap);
     }
 
@@ -78,13 +81,13 @@ public class DomTransformer {
         for(Map.Entry<String, Object> entry: values.entrySet()){
             if(entry.getValue() instanceof Collection){
                 for(Object item: (Collection) entry.getValue()) {
-                    Element element = xmlDoc.createElement(entry.getKey());
                     if(item!=null && item instanceof Map){
-                        element.appendChild(transform(xmlDoc, Collections.singletonMap(entry.getKey(),item)));
-                    } else {
+                        node.appendChild(transform(xmlDoc, Collections.singletonMap(entry.getKey(),item)));
+                    } else if(item!=null){
+                        Element element = xmlDoc.createElement(entry.getKey());
                         element.appendChild(xmlDoc.createTextNode(item.toString()));
+                        node.appendChild(element);
                     }
-                    node.appendChild(element);
                 }
             } else {
                 Node transform = transform(xmlDoc, Collections.singletonMap(entry.getKey(), entry.getValue()));
@@ -106,7 +109,7 @@ public class DomTransformer {
             return Collections.singletonMap(nodeName, typeConverter.transform(currentNode.getNodeValue()));
         }
 
-        Map<String, Object> nodesResultSet = new TreeMap<>();
+        Map<String, Object> nodesResultSet = new LinkedHashMap<>();
 
         processAttributes(currentNode, nodesResultSet);
         processTextContent(nodesResultSet, currentNode.getChildNodes());
@@ -152,7 +155,7 @@ public class DomTransformer {
     }
 
     private Map<String, Object> getNestedElementsAsMap(List<Map<String, Object>> nestedNodes) {
-        Map<String, Object> resultNodeMap = new TreeMap<>();
+        Map<String, Object> resultNodeMap = new LinkedHashMap<>();
         nestedNodes.stream().map(Map::entrySet).flatMap(Collection::stream).forEach(answer -> resultNodeMap.put(answer.getKey(),
                 typeConverter.transform(answer.getValue())));
         return resultNodeMap;
