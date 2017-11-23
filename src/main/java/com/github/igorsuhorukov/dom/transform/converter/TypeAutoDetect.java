@@ -12,16 +12,16 @@ public class TypeAutoDetect implements TypeConverter{
     private static final Pattern INTEGER_NUMBER = Pattern.compile("[+-]?\\d+");
     private static final Pattern BOOLEAN = Pattern.compile("true|TRUE|false|FALSE");
     private static final Pattern REAL_NUMBER = Pattern.compile("[+-]?(\\d*[.])?\\d+");
-    private static final Collection<Matcher> MATCHERS= Arrays.asList(
-            new Matcher(BOOLEAN, Boolean::parseBoolean),
-            new Matcher(INTEGER_NUMBER, BigInteger::new),
-            new Matcher(REAL_NUMBER, BigDecimal::new));
+    private static final Collection<ContentMatcher> MATCHERS= Arrays.asList(
+            new ContentMatcher(BOOLEAN, Boolean::parseBoolean),
+            new ContentMatcher(INTEGER_NUMBER, BigInteger::new),
+            new ContentMatcher(REAL_NUMBER, BigDecimal::new));
 
-    private static class Matcher{
+    private static class ContentMatcher {
         private Pattern matcher;
         private Function<String, Object> function;
 
-        private Matcher(Pattern matcher, Function<String, Object> function) {
+        private ContentMatcher(Pattern matcher, Function<String, Object> function) {
             this.matcher = matcher;
             this.function = function;
         }

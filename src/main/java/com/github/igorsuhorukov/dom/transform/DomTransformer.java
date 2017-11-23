@@ -1,9 +1,12 @@
 package com.github.igorsuhorukov.dom.transform;
 
 import com.github.igorsuhorukov.dom.transform.converter.TypeConverter;
-import com.sun.org.apache.xerces.internal.dom.DocumentImpl;
+import org.apache.jackrabbit.util.ISO9075;
 import org.w3c.dom.*;
 
+import javax.xml.parsers.DocumentBuilder;
+import javax.xml.parsers.DocumentBuilderFactory;
+import javax.xml.parsers.ParserConfigurationException;
 import java.util.*;
 import java.util.function.Function;
 import java.util.regex.Pattern;
@@ -22,12 +25,20 @@ public class DomTransformer {
 
     private TypeConverter typeConverter;
 
+    private ThreadLocal<DocumentBuilder> documentBuilder = ThreadLocal.withInitial(() -> {
+        try {
+            return DocumentBuilderFactory.newInstance().newDocumentBuilder();
+        } catch (ParserConfigurationException e) {
+            throw new UnsupportedOperationException(e);
+        }
+    });
+
     public DomTransformer(TypeConverter typeConverter) {
         this.typeConverter = typeConverter;
     }
 
     public Node transform(Map<String, Object> objectMap){
-        Document xmlDoc = new DocumentImpl();
+        Document xmlDoc = documentBuilder.get().newDocument();
         if(objectMap.size()!=1){
             throw new IllegalArgumentException("map size must be 1");
         }
@@ -40,55 +51,54 @@ public class DomTransformer {
         }
         String objectName = objectMap.keySet().iterator().next();
         if(objectName.startsWith("@")){
-            Attr attribute = xmlDoc.createAttribute(objectName.substring(1));
-            Object value = objectMap.get(objectName);
-            if(value instanceof Map || value instanceof Collection) {
-                throw new IllegalArgumentException("invalid attribute "+objectName+" content: "+value.toString());
-            }
-            attribute.setValue(value.toString());
-            return attribute;
-
+            return createAttribute(xmlDoc, objectMap, objectName);
         } else {
-            Node node = null;
-            try {
-                node = xmlDoc.createElement(objectName);
-            } catch (DOMException e) {
-                e.printStackTrace();
-            }
-            Object value = objectMap.get(objectName);
-            if(value!=null) {
-                if (value instanceof List) {
-                    for(Object item : (List)value){
-                        if(item instanceof Map){
-                            Map<String, Object> element = (Map<String, Object>) item;
-                            transformMap(xmlDoc, node, element);
-                        } else {
-                            node.appendChild(xmlDoc.createTextNode(item.toString()));
-                        }
-                    }
-                } else if (value instanceof Map) {
-                    transformMap(xmlDoc, node, (Map<String, Object>) value);
-                } else {
-                    node.appendChild(xmlDoc.createTextNode(value.toString()));
-                }
-            }
-            return node;
+            return createNode(xmlDoc, objectMap, objectName);
         }
+    }
+
+    private Node createNode(Document xmlDoc, Map<String, Object> objectMap, String objectName) {
+        Node node = null;
+        try {
+            node = xmlDoc.createElement(ISO9075.encode(objectName));
+        } catch (DOMException e) {
+            throw new IllegalArgumentException(e);
+        }
+        Object value = objectMap.get(objectName);
+        if(value!=null) {
+            if (value instanceof List) {
+                for(Object item : (List)value){
+                    if(item instanceof Map){
+                        Map<String, Object> element = (Map<String, Object>) item;
+                        transformMap(xmlDoc, node, element);
+                    } else {
+                        node.appendChild(xmlDoc.createTextNode(item.toString()));
+                    }
+                }
+            } else if (value instanceof Map) {
+                transformMap(xmlDoc, node, (Map<String, Object>) value);
+            } else {
+                node.appendChild(xmlDoc.createTextNode(value.toString()));
+            }
+        }
+        return node;
+    }
+
+    private Node createAttribute(Document xmlDoc, Map<String, Object> objectMap, String objectName) {
+        Attr attribute = xmlDoc.createAttribute(ISO9075.encode(objectName.substring(1)));
+        Object value = objectMap.get(objectName);
+        if(value instanceof Map || value instanceof Collection) {
+            throw new IllegalArgumentException("invalid attribute "+objectName+" content: "+value.toString());
+        }
+        attribute.setValue(value.toString());
+        return attribute;
     }
 
     private void transformMap(Document xmlDoc, Node node, Map<String, Object> value) {
         Map<String, Object> values = value;
         for(Map.Entry<String, Object> entry: values.entrySet()){
             if(entry.getValue() instanceof Collection){
-                for(Object item: (Collection) entry.getValue()) {
-                    if(item!=null && item instanceof Map){
-                        node.appendChild(transform(xmlDoc, Collections.singletonMap(entry.getKey(),item)));
-                    } else if(item!=null){
-                        Element element = xmlDoc.createElement(entry.getKey());
-                        element.appendChild(xmlDoc.createTextNode(item.toString()));
-                        node.appendChild(element);
-                    }
-                }
+                transformJsonCollection(xmlDoc, node, entry);
             } else {
                 Node transform = transform(xmlDoc, Collections.singletonMap(entry.getKey(), entry.getValue()));
                 if (VALUE_NAME.equals(entry.getKey())) {
@@ -98,6 +108,18 @@ public class DomTransformer {
                 } else {
                     node.appendChild(transform);
                 }
+            }
+        }
+    }
+
+    private void transformJsonCollection(Document xmlDoc, Node node, Map.Entry<String, Object> entry) {
+        for(Object item: (Collection) entry.getValue()) {
+            if(item!=null && item instanceof Map){
+                node.appendChild(transform(xmlDoc, Collections.singletonMap(entry.getKey(),item)));
+            } else if(item!=null){
+                Element element = xmlDoc.createElement(ISO9075.encode(entry.getKey()));
+                element.appendChild(xmlDoc.createTextNode(item.toString()));
+                node.appendChild(element);
             }
         }
     }
@@ -116,12 +138,12 @@ public class DomTransformer {
         processNestedElements(currentNode, nodesResultSet);
 
         if(nodesResultSet.size()==1 && nodesResultSet.containsKey(VALUE_NAME)){
-            return Collections.singletonMap(nodeName, nodesResultSet.values().iterator().next());
+            return Collections.singletonMap(ISO9075.decode(nodeName), nodesResultSet.values().iterator().next());
         }
         if(nodesResultSet.size()==0){
-            return Collections.singletonMap(nodeName, null);
+            return Collections.singletonMap(ISO9075.decode(nodeName), null);
         }
-        return Collections.singletonMap(nodeName, nodesResultSet);
+        return Collections.singletonMap(ISO9075.decode(nodeName), nodesResultSet);
     }
 
     private void processNestedElements(Node currentNode, Map<String, Object> resultNodes) {
@@ -132,9 +154,11 @@ public class DomTransformer {
             } else {
                 Map<String, Long> keyCountFreq = getKeyCountFreq(nestedElements);
                 Set<String> uniqueKeys = getUniqueKeys(keyCountFreq);
-                keyCountFreq.entrySet().stream().filter(entry-> entry.getValue()>1).map(Map.Entry::getKey).forEach(fieldName ->{
-                    resultNodes.put(fieldName, nestedElements.stream().map(Map::entrySet).flatMap(Collection::stream).filter(entry -> fieldName.equals(entry.getKey())).map(Map.Entry::getValue).collect(Collectors.toList()));
-                });
+                keyCountFreq.entrySet().stream().filter(entry-> entry.getValue()>1).map(Map.Entry::getKey).
+                        forEach(fieldName -> resultNodes.put(ISO9075.decode(fieldName),
+                                nestedElements.stream().map(Map::entrySet).
+                                        flatMap(Collection::stream).filter(entry -> fieldName.equals(entry.getKey())).
+                                        map(Map.Entry::getValue).collect(Collectors.toList())));
                 extractUniqueNameElements(resultNodes, nestedElements, uniqueKeys);
             }
         }
@@ -156,7 +180,7 @@ public class DomTransformer {
 
     private Map<String, Object> getNestedElementsAsMap(List<Map<String, Object>> nestedNodes) {
         Map<String, Object> resultNodeMap = new LinkedHashMap<>();
-        nestedNodes.stream().map(Map::entrySet).flatMap(Collection::stream).forEach(answer -> resultNodeMap.put(answer.getKey(),
+        nestedNodes.stream().map(Map::entrySet).flatMap(Collection::stream).forEach(answer -> resultNodeMap.put(ISO9075.decode(answer.getKey()),
                 typeConverter.transform(answer.getValue())));
         return resultNodeMap;
     }
@@ -173,7 +197,7 @@ public class DomTransformer {
     private void extractUniqueNameElements(Map<String, Object> resultNodes, List<Map<String, Object>> nestedNodes, Set<String> uniqueKeys) {
         nestedNodes.stream().map(Map::entrySet).flatMap(Collection::stream).
                 filter(entry -> uniqueKeys.contains(entry.getKey())).
-                forEach(entry -> resultNodes.put(entry.getKey(), entry.getValue()));
+                forEach(entry -> resultNodes.put(ISO9075.decode(entry.getKey()), entry.getValue()));
     }
 
     private List<Map<String, Object>> getNestedElement(NodeList nestedNodes) {
@@ -191,7 +215,7 @@ public class DomTransformer {
 
     private Map<String, Object> transformAttributes(NamedNodeMap attributes) {
         return IntStream.range(0, attributes.getLength()).mapToObj(attributes::item).
-                map(node -> new AbstractMap.SimpleImmutableEntry<>(getAttributeName(node),
+                map(node -> new AbstractMap.SimpleImmutableEntry<>(ISO9075.decode(getAttributeName(node)),
                         typeConverter.transform(node.getNodeValue()))).
                 collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
