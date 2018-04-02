@@ -1,5 +1,8 @@
 package com.github.igorsuhorukov.dom.transform;
 
+import com.github.igorsuhorukov.dom.transform.converter.AttributeDomToObject;
+import com.github.igorsuhorukov.dom.transform.converter.AttributeObjectToDom;
+import com.github.igorsuhorukov.dom.transform.converter.AttributeResolver;
 import com.github.igorsuhorukov.dom.transform.converter.TypeConverter;
 import org.apache.jackrabbit.util.ISO9075;
 import org.w3c.dom.*;
@@ -18,12 +21,15 @@ import java.util.stream.IntStream;
 public class DomTransformer {
 
     private static final Pattern WHITESPACE = Pattern.compile("\\s+");
-    private static final String VALUE_NAME = "_val_";
     private static final String TEXT_ELEMENT = "#text";
     private static final String COMMENT = "#comment";
     private static final String CDATA_SECTION = "#cdata-section";
 
-    private TypeConverter typeConverter;
+    private final TypeConverter typeConverter;
+    private final AttributeDomToObject attributeDomToObject;
+    private final AttributeResolver attributeResolver;
+    private final AttributeObjectToDom attributeObjectToDom;
+    private final String valueName;
 
     private ThreadLocal<DocumentBuilder> documentBuilder = ThreadLocal.withInitial(() -> {
         try {
@@ -34,7 +40,17 @@ public class DomTransformer {
     });
 
     public DomTransformer(TypeConverter typeConverter) {
+        this(typeConverter, name -> "@"+ name, name -> name.startsWith("@"), name -> name.substring(1), "_val_");
+    }
+
+    public DomTransformer(TypeConverter typeConverter, AttributeDomToObject attributeDomToObject,
+                          AttributeResolver attributeResolver, AttributeObjectToDom attributeObjectToDom,
+                          String valueName) {
         this.typeConverter = typeConverter;
+        this.attributeDomToObject = attributeDomToObject;
+        this.attributeResolver = attributeResolver;
+        this.attributeObjectToDom = attributeObjectToDom;
+        this.valueName = valueName;
     }
 
     public Node transform(Map<String, Object> objectMap){
@@ -50,7 +66,7 @@ public class DomTransformer {
             throw new IllegalArgumentException();
         }
         String objectName = objectMap.keySet().iterator().next();
-        if(objectName.startsWith("@")){
+        if(attributeResolver.isAttribute(objectName)){
             return createAttribute(xmlDoc, objectMap, objectName);
         } else {
             return createNode(xmlDoc, objectMap, objectName);
@@ -85,7 +101,7 @@ public class DomTransformer {
     }
 
     private Node createAttribute(Document xmlDoc, Map<String, Object> objectMap, String objectName) {
-        Attr attribute = xmlDoc.createAttribute(ISO9075.encode(objectName.substring(1)));
+        Attr attribute = xmlDoc.createAttribute(ISO9075.encode(attributeObjectToDom.getName(objectName)));
         Object value = objectMap.get(objectName);
         if(value instanceof Map || value instanceof Collection) {
             throw new IllegalArgumentException("invalid attribute "+objectName+" content: "+value.toString());
@@ -101,9 +117,9 @@ public class DomTransformer {
                 transformJsonCollection(xmlDoc, node, entry);
             } else {
                 Node transform = transform(xmlDoc, Collections.singletonMap(entry.getKey(), entry.getValue()));
-                if (VALUE_NAME.equals(entry.getKey())) {
+                if (valueName.equals(entry.getKey())) {
                     node.appendChild(xmlDoc.createTextNode(entry.getValue().toString()));
-                } else if (entry.getKey().startsWith("@")) {
+                } else if (attributeResolver.isAttribute(entry.getKey())) {
                     node.getAttributes().setNamedItem(transform);
                 } else {
                     node.appendChild(transform);
@@ -137,7 +153,7 @@ public class DomTransformer {
         processTextContent(nodesResultSet, currentNode.getChildNodes());
         processNestedElements(currentNode, nodesResultSet);
 
-        if(nodesResultSet.size()==1 && nodesResultSet.containsKey(VALUE_NAME)){
+        if(nodesResultSet.size()==1 && nodesResultSet.containsKey(valueName)){
             return Collections.singletonMap(ISO9075.decode(nodeName), nodesResultSet.values().iterator().next());
         }
         if(nodesResultSet.size()==0){
@@ -174,7 +190,7 @@ public class DomTransformer {
     private void processTextContent(Map<String, Object> resultNodes, NodeList nestedNodes) {
         String textContent = extractElementInternalContent(nestedNodes);
         if(textContent!=null && !textContent.isEmpty() && !WHITESPACE.matcher(textContent).matches()){
-            resultNodes.put(VALUE_NAME, typeConverter.transform(textContent.trim()));
+            resultNodes.put(valueName, typeConverter.transform(textContent.trim()));
         }
     }
 
@@ -215,7 +231,7 @@ public class DomTransformer {
 
     private Map<String, Object> transformAttributes(NamedNodeMap attributes) {
         return IntStream.range(0, attributes.getLength()).mapToObj(attributes::item).
-                map(node -> new AbstractMap.SimpleImmutableEntry<>(ISO9075.decode(getAttributeName(node)),
+                map(node -> new AbstractMap.SimpleImmutableEntry<>(ISO9075.decode(attributeDomToObject.getName(node.getNodeName())),
                         typeConverter.transform(node.getNodeValue()))).
                 collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue));
     }
@@ -226,9 +242,5 @@ public class DomTransformer {
 
     private boolean allNodeSimple(List<Map<String, Object>> nestedNodes) {
         return nestedNodes.stream().map(Map::size).allMatch(item->item==1);
-    }
-
-    private String getAttributeName(Node node) {
-        return "@"+node.getNodeName();
     }
 }
