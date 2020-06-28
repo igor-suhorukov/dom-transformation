@@ -8,7 +8,7 @@
     </parent>
     <groupId>com.github.igor-suhorukov</groupId>
     <artifactId>dom-transformation</artifactId>
-    <version>1.3-SNAPSHOT</version>
+    <version>1.3</version>
     <description>Transform DOM model in JSON like structure</description>
     <url>https://github.com/igor-suhorukov/dom-transformation</url>
     <developers>
