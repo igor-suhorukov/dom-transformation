@@ -2,6 +2,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.github.igorsuhorukov.dom.transform.DomTransformer;
 import com.github.igorsuhorukov.dom.transform.converter.NopTypeConverter;
 import com.github.igorsuhorukov.dom.transform.converter.TypeAutoDetect;
+import com.github.igorsuhorukov.dom.transform.document.DefaultDocumentCreator;
 import org.junit.Test;
 import org.w3c.dom.Document;
 import org.w3c.dom.Node;
@@ -47,7 +48,8 @@ public class DocbookTest {
         ObjectMapper objectMapper = new ObjectMapper();
         DateFormat df = new SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss.SSSZ");
         objectMapper.setDateFormat(df);
-        DomTransformer domTransformer = new DomTransformer(new TypeAutoDetect(), name -> "attr::"+name,
+        DomTransformer domTransformer = new DomTransformer(new TypeAutoDetect(), new DefaultDocumentCreator(),
+                                                            name -> "attr::"+name,
                                                             (String name) -> name.startsWith("attr::"),
                 (String name) ->  name.substring("attr::".length()),"contentValue_");
 

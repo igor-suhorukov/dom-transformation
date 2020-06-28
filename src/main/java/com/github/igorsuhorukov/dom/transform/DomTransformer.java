@@ -4,6 +4,8 @@ import com.github.igorsuhorukov.dom.transform.converter.AttributeDomToObject;
 import com.github.igorsuhorukov.dom.transform.converter.AttributeObjectToDom;
 import com.github.igorsuhorukov.dom.transform.converter.AttributeResolver;
 import com.github.igorsuhorukov.dom.transform.converter.TypeConverter;
+import com.github.igorsuhorukov.dom.transform.document.DefaultDocumentCreator;
+import com.github.igorsuhorukov.dom.transform.document.DocumentCreator;
 import org.apache.jackrabbit.util.ISO9075;
 import org.w3c.dom.*;
 
@@ -30,23 +32,23 @@ public class DomTransformer {
     private final AttributeResolver attributeResolver;
     private final AttributeObjectToDom attributeObjectToDom;
     private final String valueName;
-
-    private ThreadLocal<DocumentBuilder> documentBuilder = ThreadLocal.withInitial(() -> {
-        try {
-            return DocumentBuilderFactory.newInstance().newDocumentBuilder();
-        } catch (ParserConfigurationException e) {
-            throw new UnsupportedOperationException(e);
-        }
-    });
+    private final DocumentCreator documentCreator;
 
     public DomTransformer(TypeConverter typeConverter) {
-        this(typeConverter, name -> "@"+ name, name -> name.startsWith("@"), name -> name.substring(1), "_val_");
+        this(typeConverter, new DefaultDocumentCreator());
     }
 
-    public DomTransformer(TypeConverter typeConverter, AttributeDomToObject attributeDomToObject,
+    public DomTransformer(TypeConverter typeConverter, DocumentCreator documentCreator) {
+        this(typeConverter, documentCreator,
+                name -> "@" + name, name -> name.startsWith("@"), name -> name.substring(1), "_val_");
+    }
+
+    public DomTransformer(TypeConverter typeConverter, DocumentCreator documentCreator,
+                          AttributeDomToObject attributeDomToObject,
                           AttributeResolver attributeResolver, AttributeObjectToDom attributeObjectToDom,
                           String valueName) {
         this.typeConverter = typeConverter;
+        this.documentCreator = documentCreator;
         this.attributeDomToObject = attributeDomToObject;
         this.attributeResolver = attributeResolver;
         this.attributeObjectToDom = attributeObjectToDom;
@@ -54,7 +56,7 @@ public class DomTransformer {
     }
 
     public Node transform(Map<String, Object> objectMap){
-        Document xmlDoc = documentBuilder.get().newDocument();
+        Document xmlDoc = documentCreator.newDocument();
         if(objectMap.size()!=1){
             throw new IllegalArgumentException("map size must be 1");
         }
